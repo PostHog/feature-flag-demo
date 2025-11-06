@@ -58,7 +58,7 @@ export async function POST(request: NextRequest) {
       logEmitter.info(`Client-side evaluation - no server evaluation performed for ${distinctId}`);
     }
 
-    await posthogClient.shutdownAsync();
+    await posthogClient.shutdown();
 
     return NextResponse.json(result);
   } catch (error) {
