@@ -1,7 +1,11 @@
+'use client';
+
+import { LogTerminal } from './log-terminal';
+
 export function PaneThree() {
   return (
-    <div className="flex h-full items-center justify-center p-6">
-      <span className="text-2xl font-semibold">Three</span>
+    <div className="h-full">
+      <LogTerminal maxLogs={200} autoScroll={true} />
     </div>
   );
 }
