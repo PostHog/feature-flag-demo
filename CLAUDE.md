@@ -35,22 +35,42 @@ The application uses a resizable three-pane layout ([page.tsx](src/app/page.tsx)
 
 ### Real-Time Logging System
 
-Server-side logging architecture using Server-Sent Events:
+Server-side logging architecture using Server-Sent Events (SSE) to stream logs from server actions to the client terminal in real-time.
 
-1. **Log Emitter ([lib/log-emitter.ts](src/lib/log-emitter.ts)):** Singleton EventEmitter that broadcasts log messages server-side
+**Architecture Overview:**
+```
+Server Action → fetch(/api/emit-log) → EventEmitter → SSE Stream → Terminal Component
+```
+
+**Components:**
+
+1. **Log Emitter ([lib/log-emitter.ts](src/lib/log-emitter.ts)):** Singleton EventEmitter that broadcasts log messages
    - Supports 5 log levels: info, warn, error, success, debug
+   - Uses `globalThis` for cross-context singleton sharing
    - Maximum 100 concurrent listeners for multiple SSE connections
 
-2. **SSE Endpoint ([app/api/logs/route.ts](src/app/api/logs/route.ts)):** GET endpoint that streams logs to clients
-   - Uses `force-dynamic` to prevent caching
+2. **Emit Log API ([app/api/emit-log/route.ts](src/app/api/emit-log/route.ts)):** Internal API bridge endpoint
+   - POST endpoint that receives log messages from server actions
+   - Emits logs to the EventEmitter, which broadcasts to all SSE connections
+   - Solves Next.js worker process isolation issue
+
+3. **SSE Endpoint ([app/api/logs/route.ts](src/app/api/logs/route.ts)):** Streams logs to clients via Server-Sent Events
+   - GET endpoint with `force-dynamic` to prevent caching
    - Maintains persistent connection with proper cleanup on disconnect
    - Returns `text/event-stream` with no-cache headers
+   - Sends initial connection message and subscribes to log events
 
-3. **Server Actions ([app/actions.ts](src/app/actions.ts)):** Server-side functions that generate logs via logEmitter
-   - All actions use `'use server'` directive
-   - Include simulated async operations with delays
+4. **Server Actions ([app/actions.ts](src/app/actions.ts)):** Server-side functions that emit logs via API calls
+   - Use `'use server'` directive
+   - Call internal `emitLog()` helper that fetches `/api/emit-log`
+   - Include simulated async operations with delays for demo purposes
 
-4. **Client Terminal ([components/log-terminal.tsx](src/components/log-terminal.tsx)):** Consumes SSE stream and displays logs
+5. **Client Terminal ([components/log-terminal.tsx](src/components/log-terminal.tsx)):** React component that displays logs
+   - Uses EventSource API to consume SSE stream from `/api/logs`
+   - Auto-scrolls to show latest logs
+   - Color-coded log levels with emoji indicators
+   - Connection status indicator
+   - Configurable max log limit (default 100)
 
 ### PostHog Integration
 
@@ -74,17 +94,33 @@ UI components use shadcn/ui with "new-york" style:
 
 ### Server Actions with Logging
 
-When creating new server actions:
+When creating new server actions, emit logs via the internal API to ensure they reach the SSE stream:
+
 ```typescript
 'use server';
-import { logEmitter } from '@/lib/log-emitter';
+import { LogMessage } from '@/lib/log-emitter';
+
+// Helper function to emit logs via API endpoint
+async function emitLog(level: LogMessage['level'], message: string) {
+  try {
+    await fetch('http://localhost:3000/api/emit-log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ level, message }),
+    });
+  } catch (error) {
+    console.error('Failed to emit log:', error);
+  }
+}
 
 export async function myAction() {
-  logEmitter.info('Starting action...');
-  // ... logic
-  logEmitter.success('Action completed');
+  await emitLog('info', 'Starting action...');
+  // ... your logic here
+  await emitLog('success', 'Action completed');
 }
 ```
+
+**Why this pattern?** Next.js 16 runs server actions in separate worker processes from route handlers. Direct `logEmitter` calls won't reach the SSE stream. The `/api/emit-log` endpoint bridges this gap by running in the same process as the SSE route.
 
 ### Client Components with Server Actions
 
