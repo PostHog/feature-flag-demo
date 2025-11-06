@@ -9,6 +9,8 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@radix-ui/react-label": "^2.1.8",
+    "@radix-ui/react-select": "^2.2.6",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.552.0",
@@ -17,6 +19,7 @@
     "posthog-node": "^5.11.2",
     "react": "19.2.0",
     "react-dom": "19.2.0",
+    "react-resizable-panels": "^3.0.6",
     "tailwind-merge": "^3.3.1"
   },
   "devDependencies": {
