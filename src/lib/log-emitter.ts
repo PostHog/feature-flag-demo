@@ -7,18 +7,17 @@ export interface LogMessage {
 }
 
 class LogEmitter extends EventEmitter {
-  private static instance: LogEmitter;
-
   private constructor() {
     super();
     this.setMaxListeners(100); // Allow multiple SSE connections
   }
 
   public static getInstance(): LogEmitter {
-    if (!LogEmitter.instance) {
-      LogEmitter.instance = new LogEmitter();
+    // Use globalThis to ensure singleton works across Next.js contexts
+    if (!(globalThis as any).__logEmitter) {
+      (globalThis as any).__logEmitter = new LogEmitter();
     }
-    return LogEmitter.instance;
+    return (globalThis as any).__logEmitter;
   }
 
   public emitLog(level: LogMessage['level'], message: string) {
