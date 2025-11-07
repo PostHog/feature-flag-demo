@@ -23,6 +23,7 @@ export async function POST(request: NextRequest) {
 
     logEmitter.info(`Evaluating flags for ${distinctId} (method: ${evaluationMethod}, localOnly: ${onlyEvaluateLocally})`);
 
+    const startTime = performance.now();
     let result = {};
 
     if (evaluationMethod === "server-side" || evaluationMethod === "server-side-local") {
@@ -35,27 +36,34 @@ export async function POST(request: NextRequest) {
           }
         );
 
+        const elapsedTime = Math.round(performance.now() - startTime);
+
         result = {
           flags,
           evaluationMethod,
           distinctId,
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
+          elapsedTimeMs: elapsedTime
         };
 
-        logEmitter.success(`Flags evaluated successfully for ${distinctId}`);
+        logEmitter.success(`Flags evaluated successfully for ${distinctId} in ${elapsedTime}ms`);
       } catch (error) {
-        logEmitter.error(`Error evaluating flags: ${String(error)}`);
+        const elapsedTime = Math.round(performance.now() - startTime);
+        logEmitter.error(`Error evaluating flags after ${elapsedTime}ms: ${String(error)}`);
         throw error;
       }
     } else {
+      const elapsedTime = Math.round(performance.now() - startTime);
+
       result = {
         message: "Client-side evaluation selected - flags evaluated on client",
         evaluationMethod,
         distinctId,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        elapsedTimeMs: elapsedTime
       };
 
-      logEmitter.info(`Client-side evaluation - no server evaluation performed for ${distinctId}`);
+      logEmitter.info(`Client-side evaluation - no server evaluation performed for ${distinctId} (${elapsedTime}ms)`);
     }
 
     await posthogClient.shutdown();
