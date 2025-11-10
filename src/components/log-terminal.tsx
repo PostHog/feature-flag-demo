@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Terminal } from '@/components/ui/shadcn-io/terminal';
 import { LogMessage } from '@/lib/log-emitter';
 
 interface LogTerminalProps {
@@ -89,32 +88,44 @@ export function LogTerminal({ maxLogs = 100, autoScroll = true }: LogTerminalPro
   };
 
   return (
-    <div className="w-full h-full flex flex-col">
-      <div className="flex items-center justify-between px-4 py-2 bg-muted/50 border-b">
-        <h3 className="text-sm font-semibold">Server Logs</h3>
-        <div className="flex items-center gap-2">
-          <div className={`h-2 w-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
-          <span className="text-xs text-muted-foreground">
-            {isConnected ? 'Connected' : 'Disconnected'}
-          </span>
+    <div className="w-full h-full flex flex-col rounded-xl border border-border bg-background shadow-md overflow-hidden">
+      {/* Header with macOS dots and title */}
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-border bg-muted/50">
+        <div className="flex gap-2">
+          <div className="h-3 w-3 rounded-full bg-red-500"></div>
+          <div className="h-3 w-3 rounded-full bg-yellow-500"></div>
+          <div className="h-3 w-3 rounded-full bg-green-500"></div>
         </div>
+        <h3 className="text-sm font-semibold">Server logs</h3>
       </div>
+
+      {/* Log content */}
       <div ref={terminalRef} className="flex-1 overflow-auto p-4">
-        <Terminal>
-          {logs.length === 0 && (
-            <div className="text-muted-foreground text-sm">
-              Waiting for logs...
-            </div>
-          )}
-          {logs.map((log, index) => (
-            <div
-              key={`${log.timestamp}-${index}`}
-              className={`font-mono text-sm ${getLevelColor(log.level)} mb-1`}
-            >
-              {formatLog(log)}
-            </div>
-          ))}
-        </Terminal>
+        <pre>
+          <code className="grid gap-y-1">
+            {logs.length === 0 && (
+              <div className="text-muted-foreground text-sm">
+                Waiting for logs...
+              </div>
+            )}
+            {logs.map((log, index) => (
+              <div
+                key={`${log.timestamp}-${index}`}
+                className={`font-mono text-sm ${getLevelColor(log.level)}`}
+              >
+                {formatLog(log)}
+              </div>
+            ))}
+          </code>
+        </pre>
+      </div>
+
+      {/* Footer with connection status */}
+      <div className="flex items-center justify-center gap-2 px-4 py-2 border-t border-border bg-muted/50">
+        <div className={`h-2 w-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+        <span className="text-xs text-muted-foreground">
+          {isConnected ? 'Connected' : 'Disconnected'}
+        </span>
       </div>
     </div>
   );

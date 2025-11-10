@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import posthog from "posthog-js";
 import {
   Card,
@@ -17,31 +17,48 @@ interface PostHogInfo {
   evaluationMethod: string;
 }
 
-export function PostHogInfoCard() {
+interface PostHogInfoCardProps {
+  selectedFlag: string;
+}
+
+export function PostHogInfoCard({ selectedFlag }: PostHogInfoCardProps) {
   const [info, setInfo] = useState<PostHogInfo>({
     distinctId: "",
     isIdentified: false,
     featureFlagValue: undefined,
     evaluationMethod: "loading...",
   });
+  const previousDistinctIdRef = useRef<string>("");
 
   useEffect(() => {
     // Wait for PostHog to be ready
     const updateInfo = () => {
       const distinctId = posthog.get_distinct_id();
       const isIdentified = posthog.get_property("$is_identified") === true;
-      const featureFlagValue = posthog.getFeatureFlag("new-ui-flow");
+      const featureFlagValue = posthog.getFeatureFlag(selectedFlag);
 
       // Get feature flag evaluation details
-      const featureFlagPayload = posthog.getFeatureFlagPayload("new-ui-flow");
+      const featureFlagPayload = posthog.getFeatureFlagPayload(selectedFlag);
       const evaluationReason = 'local evaluation';
 
-      setInfo({
-        distinctId,
-        isIdentified,
-        featureFlagValue,
-        evaluationMethod: evaluationReason,
-      });
+      // Only update if something changed
+      if (distinctId !== previousDistinctIdRef.current) {
+        previousDistinctIdRef.current = distinctId;
+        setInfo({
+          distinctId,
+          isIdentified,
+          featureFlagValue,
+          evaluationMethod: evaluationReason,
+        });
+      } else {
+        // Update other fields even if distinct ID didn't change
+        setInfo((prev) => ({
+          ...prev,
+          isIdentified,
+          featureFlagValue,
+          evaluationMethod: evaluationReason,
+        }));
+      }
     };
 
     // Initial update
@@ -50,11 +67,14 @@ export function PostHogInfoCard() {
     // Listen for feature flag updates
     posthog.onFeatureFlags(updateInfo);
 
+    // Poll for distinct ID changes every 200ms
+    const intervalId = setInterval(updateInfo, 200);
+
     // Cleanup
     return () => {
-      // PostHog doesn't provide an off method for onFeatureFlags
+      clearInterval(intervalId);
     };
-  }, []);
+  }, [selectedFlag]);
 
   return (
     <Card className="w-full">
@@ -74,7 +94,7 @@ export function PostHogInfoCard() {
           </span>
         </div>
         <div className="flex justify-between">
-          <span className="font-medium">Feature Flag (new-ui-flow):</span>
+          <span className="font-medium">Feature Flag ({selectedFlag}):</span>
           <span className="font-mono text-sm">
             {info.featureFlagValue === undefined
               ? "not set"
