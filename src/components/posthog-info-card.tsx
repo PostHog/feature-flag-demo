@@ -9,6 +9,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { frontendPostHogManager } from "@/lib/frontend-posthog-manager";
 
 interface PostHogInfo {
   distinctId: string;
@@ -19,9 +20,10 @@ interface PostHogInfo {
 
 interface PostHogInfoCardProps {
   selectedFlag: string;
+  evaluationMethod: string;
 }
 
-export function PostHogInfoCard({ selectedFlag }: PostHogInfoCardProps) {
+export function PostHogInfoCard({ selectedFlag, evaluationMethod }: PostHogInfoCardProps) {
   const [info, setInfo] = useState<PostHogInfo>({
     distinctId: "",
     isIdentified: false,
@@ -35,11 +37,24 @@ export function PostHogInfoCard({ selectedFlag }: PostHogInfoCardProps) {
     const updateInfo = () => {
       const distinctId = posthog.get_distinct_id();
       const isIdentified = posthog.get_property("$is_identified") === true;
-      const featureFlagValue = posthog.getFeatureFlag(selectedFlag);
 
-      // Get feature flag evaluation details
-      const featureFlagPayload = posthog.getFeatureFlagPayload(selectedFlag);
-      const evaluationReason = 'local evaluation';
+      // Use frontend manager to get flag value based on evaluation mode
+      let featureFlagValue: string | boolean | undefined;
+      let evaluationReason: string;
+
+      if (evaluationMethod === "client-side") {
+        // Only call getFeatureFlag in client-side mode
+        try {
+          featureFlagValue = posthog.getFeatureFlag(selectedFlag);
+        } catch (error) {
+          featureFlagValue = undefined;
+        }
+        evaluationReason = "client-side";
+      } else {
+        // In server-side modes, get flag from stored server flags
+        featureFlagValue = frontendPostHogManager.getFeatureFlag(selectedFlag);
+        evaluationReason = evaluationMethod === "server-side-local" ? "server-side local" : "server-side";
+      }
 
       // Only update if something changed
       if (distinctId !== previousDistinctIdRef.current) {
@@ -64,17 +79,22 @@ export function PostHogInfoCard({ selectedFlag }: PostHogInfoCardProps) {
     // Initial update
     updateInfo();
 
-    // Listen for feature flag updates
-    posthog.onFeatureFlags(updateInfo);
+    // Listen for feature flag updates (only in client-side mode)
+    if (evaluationMethod === "client-side") {
+      posthog.onFeatureFlags(updateInfo);
 
-    // Poll for distinct ID changes every 200ms
-    const intervalId = setInterval(updateInfo, 200);
+      // Only poll in client-side mode for distinct ID changes
+      const intervalId = setInterval(updateInfo, 200);
 
-    // Cleanup
-    return () => {
-      clearInterval(intervalId);
-    };
-  }, [selectedFlag]);
+      // Cleanup
+      return () => {
+        clearInterval(intervalId);
+      };
+    } else {
+      // In server-side modes, don't poll - just update when props change
+      return () => {};
+    }
+  }, [selectedFlag, evaluationMethod]);
 
   return (
     <Card className="w-full">

@@ -9,29 +9,62 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import posthog from "posthog-js";
+import { frontendPostHogManager } from "@/lib/frontend-posthog-manager";
+import { browserLogger } from "@/lib/browser-logger";
 
 interface FeatureFlagDemoProps {
   selectedFlag: string;
+  evaluationMethod: string;
 }
 
-export function FeatureFlagDemo({ selectedFlag }: FeatureFlagDemoProps) {
+export function FeatureFlagDemo({ selectedFlag, evaluationMethod }: FeatureFlagDemoProps) {
   const [isNewUI, setIsNewUI] = useState(false);
 
   useEffect(() => {
-    // Listen for feature flag changes (including initial load)
-    const handleFlagChange = () => {
-      const flagValue = posthog.isFeatureEnabled(selectedFlag);
-      setIsNewUI(flagValue === true);
+    let lastFlagValue: boolean | null = null;
+
+    // Check flag value and update UI
+    const updateUI = () => {
+      let flagValue: boolean = false;
+
+      try {
+        if (evaluationMethod === "client-side") {
+          flagValue = posthog.isFeatureEnabled(selectedFlag);
+        } else {
+          // In server-side modes, get flag from frontend manager
+          const rawValue = frontendPostHogManager.getFeatureFlag(selectedFlag);
+          flagValue = rawValue === true || rawValue === "true";
+        }
+
+        // Only log and update if the value actually changed
+        if (lastFlagValue !== flagValue) {
+          lastFlagValue = flagValue;
+          browserLogger.info(`UI update: ${selectedFlag} = ${flagValue}, switching to ${flagValue ? 'new' : 'old'} UI`, 'flag-evaluation');
+          setIsNewUI(flagValue);
+        }
+      } catch (error) {
+        browserLogger.error(`Error checking flag ${selectedFlag}: ${String(error)}`, 'flag-evaluation');
+        setIsNewUI(false);
+      }
     };
 
-    // onFeatureFlags callback is triggered when flags are loaded, including initial load
-    posthog.onFeatureFlags(handleFlagChange);
+    // Initial check
+    updateUI();
 
-    // Cleanup listener on unmount
-    return () => {
-      // PostHog doesn't have a direct way to remove listeners, but this ensures cleanup
-    };
-  }, [selectedFlag]);
+    // Listen for flag changes (only in client-side mode)
+    if (evaluationMethod === "client-side") {
+      posthog.onFeatureFlags(updateUI);
+    } else {
+      // Poll for changes in server-side mode, but less frequently
+      const intervalId = setInterval(updateUI, 2000);
+      return () => {
+        clearInterval(intervalId);
+      };
+    }
+
+    // No cleanup needed for client-side mode
+    return () => {};
+  }, [selectedFlag, evaluationMethod]);
 
   return (
     <Card className="w-full">

@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { simulateTask, simulateWarning, simulateBatchProcess, simulateError } from '@/app/actions';
+import posthog from 'posthog-js';
 
 export function PaneTwo() {
   const [taskName, setTaskName] = useState('');
@@ -12,6 +13,12 @@ export function PaneTwo() {
 
   const handleSimulateTask = async () => {
     if (!taskName.trim()) return;
+
+    // Track task simulation start
+    posthog.capture('task_simulation_started', {
+      task_name: taskName,
+    });
+
     setIsProcessing(true);
     await simulateTask(taskName);
     setIsProcessing(false);
@@ -25,12 +32,18 @@ export function PaneTwo() {
   };
 
   const handleBatchProcess = async () => {
+    // Track batch process trigger
+    posthog.capture('batch_process_triggered');
+
     setIsProcessing(true);
     await simulateBatchProcess();
     setIsProcessing(false);
   };
 
   const handleError = async () => {
+    // Track error simulation trigger
+    posthog.capture('error_simulation_triggered');
+
     setIsProcessing(true);
     await simulateError();
     setIsProcessing(false);

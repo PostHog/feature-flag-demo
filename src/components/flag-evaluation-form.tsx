@@ -20,6 +20,8 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { RotateCcw, Plus, X } from "lucide-react";
 import posthog from "posthog-js";
+import { browserLogger } from "@/lib/browser-logger";
+import { frontendPostHogManager } from "@/lib/frontend-posthog-manager";
 
 interface FeatureFlag {
   key: string;
@@ -30,17 +32,19 @@ interface FeatureFlag {
 interface FlagEvaluationFormProps {
   selectedFlag: string;
   onFlagChange: (flag: string) => void;
+  onEvaluationMethodChange?: (method: string) => void;
 }
 
 export function FlagEvaluationForm({
   selectedFlag,
   onFlagChange,
+  onEvaluationMethodChange,
 }: FlagEvaluationFormProps) {
   const [featureFlags, setFeatureFlags] = useState<FeatureFlag[]>([]);
   const [isLoadingFlags, setIsLoadingFlags] = useState<boolean>(true);
   const [evaluationMethod, setEvaluationMethod] = useState<string>("client-side");
   const [onlyEvaluateLocally, setOnlyEvaluateLocally] = useState<string>("false");
-  const [email, setEmail] = useState<string>("");
+  const [distinctId, setDistinctId] = useState<string>("");
   const [personProperties, setPersonProperties] = useState<Record<string, string | number | boolean>>({});
   const [newPropertyKey, setNewPropertyKey] = useState<string>("");
   const [newPropertyValue, setNewPropertyValue] = useState<string>("");
@@ -63,14 +67,34 @@ export function FlagEvaluationForm({
     };
 
     fetchFlags();
+
+    // Initialize frontend PostHog manager
+    frontendPostHogManager.switchMode('client-side-flags');
   }, []);
+
+  // Switch PostHog mode when evaluation method changes
+  useEffect(() => {
+    const mode = evaluationMethod === 'client-side' ? 'client-side-flags' : 'server-side-flags';
+    frontendPostHogManager.switchMode(mode);
+  }, [evaluationMethod]);
 
   const handleAddProperty = () => {
     if (newPropertyKey.trim() && newPropertyValue.trim()) {
+      const key = newPropertyKey.trim();
+      const value = newPropertyValue.trim();
+
       setPersonProperties((prev) => ({
         ...prev,
-        [newPropertyKey.trim()]: newPropertyValue.trim(),
+        [key]: value,
       }));
+
+      // Track person property addition
+      posthog.capture('person_property_added', {
+        property_key: key,
+        property_value_type: typeof value,
+        total_properties: Object.keys(personProperties).length + 1,
+      });
+
       setNewPropertyKey("");
       setNewPropertyValue("");
     }
@@ -84,24 +108,54 @@ export function FlagEvaluationForm({
     });
   };
 
-  const handleIdentifyUser = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (email) {
-      const properties = { ...personProperties, is_user: true };
-      setPersonProperties(properties);
-      posthog.identify(email, properties);
+  // New function for client-side: identify user and immediately refresh flags
+  const handleIdentifyAndEvaluate = async () => {
+    const finalDistinctId = distinctId || "anonymous";
+
+    if (distinctId) {
+      // Identify the user with properties
+      browserLogger.info(`Identifying user: ${distinctId}`, 'identification');
+      frontendPostHogManager.identify(distinctId, personProperties);
+      browserLogger.success(`User identified with ${Object.keys(personProperties).length} properties`, 'identification');
+
+      // Track user identification event
+      frontendPostHogManager.capture('user_identified', {
+        distinct_id: distinctId,
+        property_count: Object.keys(personProperties).length,
+        evaluation_mode: evaluationMethod,
+      });
+    } else {
+      browserLogger.info('Using anonymous user (no distinct ID provided)', 'identification');
     }
+
+    // Auto-refresh flags after identification (client-side only)
+    browserLogger.info('Auto-refreshing flags after identification...', 'flag-call');
+    await frontendPostHogManager.reloadFlags();
   };
 
   const handleEvaluateFlags = async () => {
-    const distinctId = posthog.get_distinct_id();
+    // For server evaluation, use the distinctId from form or fallback to PostHog's ID
+    const finalDistinctId = distinctId || posthog.get_distinct_id();
 
     const payload = {
-      distinctId,
+      distinctId: finalDistinctId,
       personProperties,
       evaluationMethod,
       onlyEvaluateLocally: onlyEvaluateLocally === "true"
     };
+
+    browserLogger.info(`Calling for flags (method: ${evaluationMethod}, distinctId: ${finalDistinctId})`, 'flag-call');
+
+    // Track flag evaluation event only in client-side mode
+    if (evaluationMethod === "client-side") {
+      posthog.capture('feature_flag_evaluated', {
+        evaluation_method: evaluationMethod,
+        only_evaluate_locally: onlyEvaluateLocally === "true",
+        selected_flag: selectedFlag,
+        property_count: Object.keys(personProperties).length,
+        distinct_id: finalDistinctId,
+      });
+    }
 
     try {
       const response = await fetch("/api/evaluate-flags", {
@@ -117,31 +171,73 @@ export function FlagEvaluationForm({
       }
 
       const data = await response.json();
+
+      if (evaluationMethod === "client-side") {
+        browserLogger.info("Client-side evaluation completed", 'flag-evaluation');
+      } else {
+        const flagCount = data.flags ? Object.keys(data.flags).length : 0;
+        const flagValue = data.flags && selectedFlag ? data.flags[selectedFlag] : 'undefined';
+        browserLogger.success(`Received ${flagCount} flags from server for ${finalDistinctId}`, 'flag-payload');
+        browserLogger.info(`Selected flag "${selectedFlag}": ${flagValue}`, 'flag-payload');
+
+        // Store server flags in frontend manager and apply overrides
+        if (data.flags) {
+          frontendPostHogManager.updateServerFlags(data.flags, finalDistinctId, selectedFlag);
+          browserLogger.debug(`All flags: ${JSON.stringify(data.flags)}`, 'flag-payload');
+        }
+      }
+
       console.log("Flag evaluation result:", data);
     } catch (error) {
+      browserLogger.error(`Error evaluating flags: ${String(error)}`, 'flag-evaluation');
       console.error("Error evaluating flags:", error);
     }
   };
 
   const handleRefreshFlags = async () => {
     const startTime = performance.now();
+
     try {
-      await posthog.reloadFeatureFlags();
+      await frontendPostHogManager.reloadFlags();
       const elapsedTime = Math.round(performance.now() - startTime);
+
       console.log(`Feature flags refreshed successfully in ${elapsedTime}ms`);
 
-      // Log to terminal via API
-      await fetch('/api/emit-log', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          level: 'success',
-          message: `Client-side flags refreshed in ${elapsedTime}ms`
-        }),
+      // Track successful flag refresh
+      frontendPostHogManager.capture('feature_flags_refreshed', {
+        duration_ms: elapsedTime,
+        selected_flag: selectedFlag,
+        success: true,
+        evaluation_mode: evaluationMethod,
       });
+
+      // Log to terminal via API only for client-side evaluation
+      if (evaluationMethod === "client-side") {
+        await fetch('/api/emit-log', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            level: 'success',
+            message: `Client-side flags refreshed in ${elapsedTime}ms`
+          }),
+        });
+      }
     } catch (error) {
       const elapsedTime = Math.round(performance.now() - startTime);
+      browserLogger.error(`Error refreshing feature flags after ${elapsedTime}ms: ${String(error)}`, 'flag-call');
       console.error(`Error refreshing feature flags after ${elapsedTime}ms:`, error);
+
+      // Track failed flag refresh
+      frontendPostHogManager.capture('feature_flags_refreshed', {
+        duration_ms: elapsedTime,
+        selected_flag: selectedFlag,
+        success: false,
+        error: String(error),
+        evaluation_mode: evaluationMethod,
+      });
+
+      // Capture the error for error tracking
+      posthog.captureException(error);
 
       // Log error to terminal via API
       await fetch('/api/emit-log', {
@@ -158,10 +254,24 @@ export function FlagEvaluationForm({
   const handleResetDistinctId = async () => {
     try {
       const oldDistinctId = posthog.get_distinct_id();
+
+      // Reset both PostHog and our frontend manager
       posthog.reset();
       const newDistinctId = posthog.get_distinct_id();
 
+      // Re-initialize frontend manager with current mode
+      const mode = evaluationMethod === 'client-side' ? 'client-side-flags' : 'server-side-flags';
+      await frontendPostHogManager.switchMode(mode);
+
+      browserLogger.info(`Distinct ID reset: ${oldDistinctId} → ${newDistinctId}`, 'identification');
       console.log(`Distinct ID reset from ${oldDistinctId} to ${newDistinctId}`);
+
+      // Track distinct ID reset
+      frontendPostHogManager.capture('distinct_id_reset', {
+        old_distinct_id: oldDistinctId,
+        new_distinct_id: newDistinctId,
+        evaluation_mode: evaluationMethod,
+      });
 
       // Log to terminal via API
       await fetch('/api/emit-log', {
@@ -173,11 +283,21 @@ export function FlagEvaluationForm({
         }),
       });
 
-      // Clear the email input
-      setEmail('');
+      // Clear the distinct ID and properties
+      setDistinctId('');
       setPersonProperties({});
+
+      // If in client-side mode, refresh flags to show anonymous experience
+      if (evaluationMethod === "client-side") {
+        browserLogger.info('Refreshing flags for anonymous user...', 'flag-call');
+        await frontendPostHogManager.reloadFlags();
+        browserLogger.success('Flags refreshed for anonymous user', 'flag-call');
+      }
     } catch (error) {
       console.error('Error resetting distinct ID:', error);
+
+      // Capture error for error tracking
+      posthog.captureException(error);
 
       await fetch('/api/emit-log', {
         method: 'POST',
@@ -194,12 +314,28 @@ export function FlagEvaluationForm({
     <Card className="w-full">
       <CardHeader>
         <CardTitle>Flag Evaluation Settings</CardTitle>
-        <CardDescription>Configure how feature flags are evaluated</CardDescription>
+        <CardDescription>
+          {evaluationMethod === "client-side"
+            ? "Flags evaluated directly by PostHog client SDK in browser"
+            : evaluationMethod === "server-side"
+            ? "Send user data to server → Server calls PostHog API → Returns flags to client"
+            : "Server evaluates flags locally using cached definitions → Returns flags to client"
+          }
+        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-2">
           <Label htmlFor="feature-flag">Feature Flag:</Label>
-          <Select value={selectedFlag} onValueChange={onFlagChange}>
+          <Select value={selectedFlag} onValueChange={(value) => {
+            onFlagChange(value);
+            browserLogger.info(`Selected feature flag: ${value}`, 'flag-switch');
+            // Track feature flag change
+            frontendPostHogManager.capture('feature_flag_changed', {
+              previous_flag: selectedFlag,
+              new_flag: value,
+              evaluation_mode: evaluationMethod,
+            });
+          }}>
             <SelectTrigger id="feature-flag" className="w-full">
               <SelectValue placeholder={isLoadingFlags ? "Loading..." : "Select a feature flag"} />
             </SelectTrigger>
@@ -223,36 +359,42 @@ export function FlagEvaluationForm({
           </Select>
         </div>
 
-        <form onSubmit={handleIdentifyUser} className="space-y-2">
-          <Label htmlFor="email">Email:</Label>
+        <div className="space-y-2">
+          <Label htmlFor="distinct-id">Distinct ID:</Label>
           <div className="flex gap-2">
             <Input
-              id="email"
-              type="email"
-              placeholder="Enter email to identify user"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              id="distinct-id"
+              type="text"
+              placeholder={evaluationMethod === "client-side" ? "Enter user ID (or leave empty for anonymous)" : "Enter user ID for server evaluation"}
+              value={distinctId}
+              onChange={(e) => setDistinctId(e.target.value)}
               className="flex-1"
             />
-            <Button type="submit" variant="secondary">
-              Identify
-            </Button>
             <Button
               type="button"
               variant="outline"
               size="icon"
               onClick={handleResetDistinctId}
-              title="Reset distinct ID"
+              title="Reset to anonymous"
             >
               <RotateCcw className="h-4 w-4" />
             </Button>
           </div>
-        </form>
+        </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="evaluation-method">Flag evaluation method:</Label>
-            <Select value={evaluationMethod} onValueChange={setEvaluationMethod}>
+            <Select value={evaluationMethod} onValueChange={(value) => {
+              setEvaluationMethod(value);
+              onEvaluationMethodChange?.(value);
+              browserLogger.info(`Switching flag evaluation method: ${evaluationMethod} → ${value}`, 'flag-switch');
+              // Track evaluation method change (always track this as it affects the demo itself)
+              frontendPostHogManager.capture('evaluation_method_changed', {
+                previous_method: evaluationMethod,
+                new_method: value,
+              });
+            }}>
               <SelectTrigger id="evaluation-method" className="w-full">
                 <SelectValue placeholder="Select evaluation method" />
               </SelectTrigger>
@@ -269,7 +411,7 @@ export function FlagEvaluationForm({
             <Select
               value={onlyEvaluateLocally}
               onValueChange={setOnlyEvaluateLocally}
-              disabled={evaluationMethod === "client-side"}
+              disabled={evaluationMethod === "client-side" || evaluationMethod === "server-side"}
             >
               <SelectTrigger id="evaluate-locally" className="w-full">
                 <SelectValue placeholder="Select option" />
@@ -331,18 +473,11 @@ export function FlagEvaluationForm({
 
         <div className="flex gap-2 mt-6">
           <Button
-            onClick={handleEvaluateFlags}
+            onClick={evaluationMethod === "client-side" ? handleIdentifyAndEvaluate : handleEvaluateFlags}
             className="flex-1"
             variant="default"
           >
-            Evaluate Flags
-          </Button>
-          <Button
-            onClick={handleRefreshFlags}
-            variant="outline"
-            className="flex-1"
-          >
-            Refresh Flags
+            {evaluationMethod === "client-side" ? "Identify User & Get Flags" : "Get Flags from Server"}
           </Button>
         </div>
       </CardContent>

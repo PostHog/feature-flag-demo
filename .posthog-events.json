@@ -1,0 +1,72 @@
+[
+  {
+    "event_name": "user_identified",
+    "description": "User identified themselves with an email address",
+    "file_path": "/Users/cameron/Documents/code_scratch/feature-flag-demo/src/components/flag-evaluation-form.tsx"
+  },
+  {
+    "event_name": "feature_flag_evaluated",
+    "description": "User manually triggered feature flag evaluation",
+    "file_path": "/Users/cameron/Documents/code_scratch/feature-flag-demo/src/components/flag-evaluation-form.tsx"
+  },
+  {
+    "event_name": "feature_flags_refreshed",
+    "description": "User refreshed feature flags from PostHog",
+    "file_path": "/Users/cameron/Documents/code_scratch/feature-flag-demo/src/components/flag-evaluation-form.tsx"
+  },
+  {
+    "event_name": "distinct_id_reset",
+    "description": "User reset their distinct ID to start a new session",
+    "file_path": "/Users/cameron/Documents/code_scratch/feature-flag-demo/src/components/flag-evaluation-form.tsx"
+  },
+  {
+    "event_name": "feature_flag_changed",
+    "description": "User changed which feature flag they are viewing",
+    "file_path": "/Users/cameron/Documents/code_scratch/feature-flag-demo/src/components/flag-evaluation-form.tsx"
+  },
+  {
+    "event_name": "person_property_added",
+    "description": "User added a custom person property for flag evaluation",
+    "file_path": "/Users/cameron/Documents/code_scratch/feature-flag-demo/src/components/flag-evaluation-form.tsx"
+  },
+  {
+    "event_name": "evaluation_method_changed",
+    "description": "User changed the flag evaluation method (client/server-side)",
+    "file_path": "/Users/cameron/Documents/code_scratch/feature-flag-demo/src/components/flag-evaluation-form.tsx"
+  },
+  {
+    "event_name": "task_simulation_started",
+    "description": "User started a custom task simulation from the control panel",
+    "file_path": "/Users/cameron/Documents/code_scratch/feature-flag-demo/src/components/pane-two.tsx"
+  },
+  {
+    "event_name": "batch_process_triggered",
+    "description": "User triggered the batch process simulation",
+    "file_path": "/Users/cameron/Documents/code_scratch/feature-flag-demo/src/components/pane-two.tsx"
+  },
+  {
+    "event_name": "error_simulation_triggered",
+    "description": "User triggered error simulation to test error handling",
+    "file_path": "/Users/cameron/Documents/code_scratch/feature-flag-demo/src/components/pane-two.tsx"
+  },
+  {
+    "event_name": "task_completed",
+    "description": "Server action task completed successfully or failed",
+    "file_path": "/Users/cameron/Documents/code_scratch/feature-flag-demo/src/app/actions.ts"
+  },
+  {
+    "event_name": "server_flag_evaluation_completed",
+    "description": "Server-side feature flag evaluation completed",
+    "file_path": "/Users/cameron/Documents/code_scratch/feature-flag-demo/src/app/api/evaluate-flags/route.ts"
+  },
+  {
+    "event_name": "server_flag_evaluation_error",
+    "description": "Error occurred during server-side flag evaluation",
+    "file_path": "/Users/cameron/Documents/code_scratch/feature-flag-demo/src/app/api/evaluate-flags/route.ts"
+  },
+  {
+    "event_name": "feature_flags_fetch_error",
+    "description": "Error occurred while fetching feature flags from PostHog API",
+    "file_path": "/Users/cameron/Documents/code_scratch/feature-flag-demo/src/app/api/feature-flags/route.ts"
+  }
+]
