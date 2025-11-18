@@ -1,6 +1,7 @@
 'use server';
 
 import { LogMessage } from '@/lib/log-emitter';
+import { getPostHogClient } from '@/lib/posthog-server';
 
 // Helper function to emit logs via API endpoint
 async function emitLog(level: LogMessage['level'], message: string) {
@@ -16,6 +17,9 @@ async function emitLog(level: LogMessage['level'], message: string) {
 }
 
 export async function simulateTask(taskName: string) {
+  const posthog = getPostHogClient();
+  const startTime = performance.now();
+
   await emitLog('info', `Starting task: ${taskName}`);
 
   // Simulate some processing steps
@@ -28,12 +32,42 @@ export async function simulateTask(taskName: string) {
   // Simulate random outcome
   const success = Math.random() > 0.3;
 
+  const duration = Math.round(performance.now() - startTime);
+
   if (success) {
     await new Promise(resolve => setTimeout(resolve, 600));
     await emitLog('success', `✨ Task "${taskName}" completed successfully`);
+
+    // Track successful task completion on server-side
+    posthog.capture({
+      distinctId: 'server',
+      event: 'task_completed',
+      properties: {
+        task_name: taskName,
+        success: true,
+        duration_ms: duration,
+        source: 'server',
+      }
+    });
+    await posthog.shutdown();
+
     return { success: true, message: 'Task completed!' };
   } else {
     await emitLog('error', `Failed to complete task: ${taskName}`);
+
+    // Track failed task completion on server-side
+    posthog.capture({
+      distinctId: 'server',
+      event: 'task_completed',
+      properties: {
+        task_name: taskName,
+        success: false,
+        duration_ms: duration,
+        source: 'server',
+      }
+    });
+    await posthog.shutdown();
+
     return { success: false, message: 'Task failed!' };
   }
 }

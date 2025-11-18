@@ -9,27 +9,50 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import posthog from "posthog-js";
+import { frontendPostHogManager } from "@/lib/frontend-posthog-manager";
+import { browserLogger } from "@/lib/browser-logger";
 
 interface FeatureFlagDemoProps {
   selectedFlag: string;
+  fullHeight?: boolean;
 }
 
-export function FeatureFlagDemo({ selectedFlag }: FeatureFlagDemoProps) {
+export function FeatureFlagDemo({ selectedFlag, fullHeight = false }: FeatureFlagDemoProps) {
   const [isNewUI, setIsNewUI] = useState(false);
 
   useEffect(() => {
-    // Listen for feature flag changes (including initial load)
-    const handleFlagChange = () => {
-      const flagValue = posthog.isFeatureEnabled(selectedFlag);
-      setIsNewUI(flagValue === true);
+    let lastFlagValue: boolean | null = null;
+
+    // Check flag value and update UI
+    const updateUI = () => {
+      let flagValue: boolean = false;
+
+      try {
+        // Use PostHog directly - no need for manager abstraction
+        const rawValue = posthog.getFeatureFlag(selectedFlag);
+        flagValue = rawValue === true || rawValue === "true";
+
+        // Only log and update if the value actually changed
+        if (lastFlagValue !== flagValue) {
+          lastFlagValue = flagValue;
+          browserLogger.info(`UI update: ${selectedFlag} = ${rawValue} (${typeof rawValue}) -> ${flagValue}, switching to ${flagValue ? 'new' : 'old'} UI`, 'flag-evaluation');
+          setIsNewUI(flagValue);
+        }
+      } catch (error) {
+        browserLogger.error(`Error checking flag ${selectedFlag}: ${String(error)}`, 'flag-evaluation');
+        setIsNewUI(false);
+      }
     };
 
-    // onFeatureFlags callback is triggered when flags are loaded, including initial load
-    posthog.onFeatureFlags(handleFlagChange);
+    // Initial check
+    updateUI();
 
-    // Cleanup listener on unmount
+    // Listen for PostHog flag changes and poll as fallback
+    posthog.onFeatureFlags(updateUI);
+    const intervalId = setInterval(updateUI, 1000);
+
     return () => {
-      // PostHog doesn't have a direct way to remove listeners, but this ensures cleanup
+      clearInterval(intervalId);
     };
   }, [selectedFlag]);
 

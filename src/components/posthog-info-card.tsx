@@ -9,6 +9,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { frontendPostHogManager } from "@/lib/frontend-posthog-manager";
 
 interface PostHogInfo {
   distinctId: string;
@@ -19,9 +20,10 @@ interface PostHogInfo {
 
 interface PostHogInfoCardProps {
   selectedFlag: string;
+  compact?: boolean;
 }
 
-export function PostHogInfoCard({ selectedFlag }: PostHogInfoCardProps) {
+export function PostHogInfoCard({ selectedFlag, compact = false }: PostHogInfoCardProps) {
   const [info, setInfo] = useState<PostHogInfo>({
     distinctId: "",
     isIdentified: false,
@@ -34,12 +36,27 @@ export function PostHogInfoCard({ selectedFlag }: PostHogInfoCardProps) {
     // Wait for PostHog to be ready
     const updateInfo = () => {
       const distinctId = posthog.get_distinct_id();
-      const isIdentified = posthog.get_property("$is_identified") === true;
-      const featureFlagValue = posthog.getFeatureFlag(selectedFlag);
 
-      // Get feature flag evaluation details
-      const featureFlagPayload = posthog.getFeatureFlagPayload(selectedFlag);
-      const evaluationReason = 'local evaluation';
+      // Check identification status based on distinct_id change
+      // Anonymous users get a UUID like "019a939f-d6dd-7ad3-ad82-63ea557ca3c8"
+      // Identified users get the custom distinct_id they provided
+      const isAnonymousId = distinctId && distinctId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+      const isIdentified = !isAnonymousId;
+
+      // Debug identification detection using browser logger
+      if (typeof window !== 'undefined' && (window as any).browserLogger) {
+        (window as any).browserLogger.debug(`Identification debug: distinctId="${distinctId}", isAnonymousId=${!!isAnonymousId}, isIdentified=${isIdentified}`, 'posthog-info');
+      }
+
+      // Get flag value directly from PostHog
+      let featureFlagValue: string | boolean | undefined;
+      let evaluationReason: string = "PostHog";
+
+      try {
+        featureFlagValue = posthog.getFeatureFlag(selectedFlag);
+      } catch (error) {
+        featureFlagValue = undefined;
+      }
 
       // Only update if something changed
       if (distinctId !== previousDistinctIdRef.current) {
@@ -64,10 +81,8 @@ export function PostHogInfoCard({ selectedFlag }: PostHogInfoCardProps) {
     // Initial update
     updateInfo();
 
-    // Listen for feature flag updates
+    // Listen for PostHog flag updates and poll for changes
     posthog.onFeatureFlags(updateInfo);
-
-    // Poll for distinct ID changes every 200ms
     const intervalId = setInterval(updateInfo, 200);
 
     // Cleanup

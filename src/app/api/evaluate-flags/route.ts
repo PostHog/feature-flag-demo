@@ -1,15 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { PostHog } from "posthog-node";
 import { logEmitter } from "@/lib/log-emitter";
-
-const posthogClient = new PostHog(
-  process.env.POSTHOG_FEATURE_FLAG_API_KEY!,
-  {
-    host: process.env.POSTHOG_HOST || "https://us.i.posthog.com",
-    flushAt: 1,
-    flushInterval: 0
-  }
-);
+import { posthogManager } from "@/lib/posthog-manager";
 
 export async function POST(request: NextRequest) {
   try {
@@ -28,12 +19,14 @@ export async function POST(request: NextRequest) {
 
     if (evaluationMethod === "server-side" || evaluationMethod === "server-side-local") {
       try {
-        const flags = await posthogClient.getAllFlags(
+        // Switch PostHog manager mode based on evaluation method
+        const mode = evaluationMethod === "server-side-local" ? "local-evaluation" : "standard";
+        await posthogManager.switchMode(mode);
+
+        const flags = await posthogManager.evaluateFlags(
           distinctId,
-          {
-            personProperties,
-            onlyEvaluateLocally
-          }
+          personProperties,
+          onlyEvaluateLocally
         );
 
         const elapsedTime = Math.round(performance.now() - startTime);
@@ -47,9 +40,37 @@ export async function POST(request: NextRequest) {
         };
 
         logEmitter.success(`Flags evaluated successfully for ${distinctId} in ${elapsedTime}ms`);
+
+        // Track successful server-side flag evaluation
+        await posthogManager.capture({
+          distinctId,
+          event: 'server_flag_evaluation_completed',
+          properties: {
+            evaluation_method: evaluationMethod,
+            only_evaluate_locally: onlyEvaluateLocally,
+            duration_ms: elapsedTime,
+            flag_count: Object.keys(flags).length,
+            property_count: Object.keys(personProperties || {}).length,
+            success: true,
+          }
+        });
       } catch (error) {
         const elapsedTime = Math.round(performance.now() - startTime);
         logEmitter.error(`Error evaluating flags after ${elapsedTime}ms: ${String(error)}`);
+
+        // Track failed server-side flag evaluation
+        await posthogManager.capture({
+          distinctId,
+          event: 'server_flag_evaluation_error',
+          properties: {
+            evaluation_method: evaluationMethod,
+            only_evaluate_locally: onlyEvaluateLocally,
+            duration_ms: elapsedTime,
+            error: String(error),
+            property_count: Object.keys(personProperties || {}).length,
+          }
+        });
+
         throw error;
       }
     } else {
@@ -63,10 +84,8 @@ export async function POST(request: NextRequest) {
         elapsedTimeMs: elapsedTime
       };
 
-      logEmitter.info(`Client-side evaluation - no server evaluation performed for ${distinctId} (${elapsedTime}ms)`);
+      // For client-side evaluation, don't log to server terminal since no server work is done
     }
-
-    await posthogClient.shutdown();
 
     return NextResponse.json(result);
   } catch (error) {
