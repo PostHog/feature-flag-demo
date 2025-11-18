@@ -4,7 +4,7 @@ export interface BrowserLogMessage {
   level: BrowserLogLevel;
   message: string;
   timestamp: string;
-  category?: 'identification' | 'flag-evaluation' | 'flag-switch' | 'flag-call' | 'flag-payload' | 'general';
+  category?: 'identification' | 'flag-evaluation' | 'flag-switch' | 'flag-call' | 'flag-payload' | 'app-lifecycle' | 'general';
 }
 
 class BrowserLogger {
@@ -12,6 +12,8 @@ class BrowserLogger {
   private listeners: ((log: BrowserLogMessage) => void)[] = [];
   private logs: BrowserLogMessage[] = [];
   private maxLogs = 50; // Reduced from 100
+  private recentMessages = new Map<string, number>(); // For deduplication
+  private duplicateThreshold = 3000; // 3 seconds
 
   private constructor() {
     // No longer intercept console methods - only use explicit logging
@@ -25,6 +27,22 @@ class BrowserLogger {
   }
 
   emit(level: BrowserLogLevel, message: string, category?: BrowserLogMessage['category']): void {
+    const now = Date.now();
+    const messageKey = `${level}:${message}:${category || 'general'}`;
+
+    // Check for recent duplicate
+    const lastSeen = this.recentMessages.get(messageKey);
+    if (lastSeen && (now - lastSeen) < this.duplicateThreshold) {
+      // Skip duplicate message within threshold
+      return;
+    }
+
+    // Update recent message timestamp
+    this.recentMessages.set(messageKey, now);
+
+    // Clean up old entries
+    this.cleanupRecentMessages(now);
+
     const log: BrowserLogMessage = {
       level,
       message,
@@ -77,6 +95,16 @@ class BrowserLogger {
 
   clear(): void {
     this.logs = [];
+    this.recentMessages.clear();
+  }
+
+  private cleanupRecentMessages(now: number): void {
+    // Remove entries older than threshold
+    for (const [key, timestamp] of this.recentMessages.entries()) {
+      if (now - timestamp > this.duplicateThreshold) {
+        this.recentMessages.delete(key);
+      }
+    }
   }
 }
 

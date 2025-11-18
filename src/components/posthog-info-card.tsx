@@ -20,10 +20,10 @@ interface PostHogInfo {
 
 interface PostHogInfoCardProps {
   selectedFlag: string;
-  evaluationMethod: string;
+  compact?: boolean;
 }
 
-export function PostHogInfoCard({ selectedFlag, evaluationMethod }: PostHogInfoCardProps) {
+export function PostHogInfoCard({ selectedFlag, compact = false }: PostHogInfoCardProps) {
   const [info, setInfo] = useState<PostHogInfo>({
     distinctId: "",
     isIdentified: false,
@@ -36,24 +36,26 @@ export function PostHogInfoCard({ selectedFlag, evaluationMethod }: PostHogInfoC
     // Wait for PostHog to be ready
     const updateInfo = () => {
       const distinctId = posthog.get_distinct_id();
-      const isIdentified = posthog.get_property("$is_identified") === true;
 
-      // Use frontend manager to get flag value based on evaluation mode
+      // Check identification status based on distinct_id change
+      // Anonymous users get a UUID like "019a939f-d6dd-7ad3-ad82-63ea557ca3c8"
+      // Identified users get the custom distinct_id they provided
+      const isAnonymousId = distinctId && distinctId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+      const isIdentified = !isAnonymousId;
+
+      // Debug identification detection using browser logger
+      if (typeof window !== 'undefined' && (window as any).browserLogger) {
+        (window as any).browserLogger.debug(`Identification debug: distinctId="${distinctId}", isAnonymousId=${!!isAnonymousId}, isIdentified=${isIdentified}`, 'posthog-info');
+      }
+
+      // Get flag value directly from PostHog
       let featureFlagValue: string | boolean | undefined;
-      let evaluationReason: string;
+      let evaluationReason: string = "PostHog";
 
-      if (evaluationMethod === "client-side") {
-        // Only call getFeatureFlag in client-side mode
-        try {
-          featureFlagValue = posthog.getFeatureFlag(selectedFlag);
-        } catch (error) {
-          featureFlagValue = undefined;
-        }
-        evaluationReason = "client-side";
-      } else {
-        // In server-side modes, get flag from stored server flags
-        featureFlagValue = frontendPostHogManager.getFeatureFlag(selectedFlag);
-        evaluationReason = evaluationMethod === "server-side-local" ? "server-side local" : "server-side";
+      try {
+        featureFlagValue = posthog.getFeatureFlag(selectedFlag);
+      } catch (error) {
+        featureFlagValue = undefined;
       }
 
       // Only update if something changed
@@ -79,22 +81,15 @@ export function PostHogInfoCard({ selectedFlag, evaluationMethod }: PostHogInfoC
     // Initial update
     updateInfo();
 
-    // Listen for feature flag updates (only in client-side mode)
-    if (evaluationMethod === "client-side") {
-      posthog.onFeatureFlags(updateInfo);
+    // Listen for PostHog flag updates and poll for changes
+    posthog.onFeatureFlags(updateInfo);
+    const intervalId = setInterval(updateInfo, 200);
 
-      // Only poll in client-side mode for distinct ID changes
-      const intervalId = setInterval(updateInfo, 200);
-
-      // Cleanup
-      return () => {
-        clearInterval(intervalId);
-      };
-    } else {
-      // In server-side modes, don't poll - just update when props change
-      return () => {};
-    }
-  }, [selectedFlag, evaluationMethod]);
+    // Cleanup
+    return () => {
+      clearInterval(intervalId);
+    };
+  }, [selectedFlag]);
 
   return (
     <Card className="w-full">

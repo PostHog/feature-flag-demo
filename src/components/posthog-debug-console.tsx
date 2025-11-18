@@ -48,7 +48,7 @@ export function PostHogDebugConsole() {
       if ((urlString.includes('/ingest') || urlString.includes('posthog.com')) && !urlString.includes('/s')) {
         const originalSend = this.send;
 
-        this.send = function(body?: string | Document | FormData | Blob | ArrayBufferView | ArrayBuffer | null) {
+        this.send = function(body?: XMLHttpRequestBodyInit | Document | null) {
           addEvent('network', {
             method,
             url: urlString,
@@ -58,7 +58,7 @@ export function PostHogDebugConsole() {
         };
       }
 
-      return originalXHR.call(this, method, url, ...args);
+      return originalXHR.apply(this, [method, url, ...args] as Parameters<typeof originalXHR>);
     };
 
     // Intercept fetch for PostHog network calls
@@ -104,7 +104,7 @@ export function PostHogDebugConsole() {
       posthog.onFeatureFlags(() => {
         addEvent('event', {
           type: 'feature_flags_loaded',
-          flags: posthog.getFeatureFlags()
+          flags: (posthog as any).getFlags ? (posthog as any).getFlags() : 'unknown'
         });
       });
     }
@@ -145,7 +145,7 @@ export function PostHogDebugConsole() {
       case 'console':
         return (
           <div className="text-green-600 font-mono text-xs">
-            [{event.data.level.toUpperCase()}] {JSON.stringify(event.data.message)}
+            [{event.data.level?.toUpperCase() || 'UNKNOWN'}] {JSON.stringify(event.data.message)}
           </div>
         );
       case 'event':

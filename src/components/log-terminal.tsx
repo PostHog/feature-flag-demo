@@ -6,13 +6,23 @@ import { LogMessage } from '@/lib/log-emitter';
 interface LogTerminalProps {
   maxLogs?: number;
   autoScroll?: boolean;
+  onClearRef?: (clearFn: () => void) => void;
 }
 
-export function LogTerminal({ maxLogs = 100, autoScroll = true }: LogTerminalProps) {
+export function LogTerminal({ maxLogs = 100, autoScroll = true, onClearRef }: LogTerminalProps) {
   const [logs, setLogs] = useState<LogMessage[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
   const terminalRef = useRef<HTMLDivElement>(null);
+
+  const clearLogs = () => setLogs([]);
+
+  // Provide clear function to parent
+  useEffect(() => {
+    if (onClearRef) {
+      onClearRef(clearLogs);
+    }
+  }, [onClearRef]);
 
   useEffect(() => {
     // Create EventSource connection
@@ -97,6 +107,15 @@ export function LogTerminal({ maxLogs = 100, autoScroll = true }: LogTerminalPro
           <div className="h-3 w-3 rounded-full bg-green-500"></div>
         </div>
         <h3 className="text-sm font-semibold">Server logs</h3>
+        <div className="ml-auto">
+          <button
+            onClick={clearLogs}
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded hover:bg-background/50"
+            title="Clear server logs"
+          >
+            Clear
+          </button>
+        </div>
       </div>
 
       {/* Log content */}

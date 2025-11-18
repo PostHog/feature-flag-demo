@@ -14,10 +14,10 @@ import { browserLogger } from "@/lib/browser-logger";
 
 interface FeatureFlagDemoProps {
   selectedFlag: string;
-  evaluationMethod: string;
+  fullHeight?: boolean;
 }
 
-export function FeatureFlagDemo({ selectedFlag, evaluationMethod }: FeatureFlagDemoProps) {
+export function FeatureFlagDemo({ selectedFlag, fullHeight = false }: FeatureFlagDemoProps) {
   const [isNewUI, setIsNewUI] = useState(false);
 
   useEffect(() => {
@@ -28,18 +28,14 @@ export function FeatureFlagDemo({ selectedFlag, evaluationMethod }: FeatureFlagD
       let flagValue: boolean = false;
 
       try {
-        if (evaluationMethod === "client-side") {
-          flagValue = posthog.isFeatureEnabled(selectedFlag);
-        } else {
-          // In server-side modes, get flag from frontend manager
-          const rawValue = frontendPostHogManager.getFeatureFlag(selectedFlag);
-          flagValue = rawValue === true || rawValue === "true";
-        }
+        // Use PostHog directly - no need for manager abstraction
+        const rawValue = posthog.getFeatureFlag(selectedFlag);
+        flagValue = rawValue === true || rawValue === "true";
 
         // Only log and update if the value actually changed
         if (lastFlagValue !== flagValue) {
           lastFlagValue = flagValue;
-          browserLogger.info(`UI update: ${selectedFlag} = ${flagValue}, switching to ${flagValue ? 'new' : 'old'} UI`, 'flag-evaluation');
+          browserLogger.info(`UI update: ${selectedFlag} = ${rawValue} (${typeof rawValue}) -> ${flagValue}, switching to ${flagValue ? 'new' : 'old'} UI`, 'flag-evaluation');
           setIsNewUI(flagValue);
         }
       } catch (error) {
@@ -51,20 +47,14 @@ export function FeatureFlagDemo({ selectedFlag, evaluationMethod }: FeatureFlagD
     // Initial check
     updateUI();
 
-    // Listen for flag changes (only in client-side mode)
-    if (evaluationMethod === "client-side") {
-      posthog.onFeatureFlags(updateUI);
-    } else {
-      // Poll for changes in server-side mode, but less frequently
-      const intervalId = setInterval(updateUI, 2000);
-      return () => {
-        clearInterval(intervalId);
-      };
-    }
+    // Listen for PostHog flag changes and poll as fallback
+    posthog.onFeatureFlags(updateUI);
+    const intervalId = setInterval(updateUI, 1000);
 
-    // No cleanup needed for client-side mode
-    return () => {};
-  }, [selectedFlag, evaluationMethod]);
+    return () => {
+      clearInterval(intervalId);
+    };
+  }, [selectedFlag]);
 
   return (
     <Card className="w-full">
